@@ -1,0 +1,6 @@
+[submodule "em_backend"]
+	path = em_backend
+	url = https://github.com/CEIT-SSC/em_backend.git
+[submodule "em_frontend"]
+	path = em_frontend
+	url = https://github.com/CEIT-SSC/em_frontend.git
