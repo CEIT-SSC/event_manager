@@ -1,1 +1,40 @@
+# docker-compose.yml
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./em_backend
+      dockerfile: Dockerfile
+    image: embackend-image
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+    expose:
+      - "80"
+
+  frontend:
+    build:
+      context: ./em_frontend
+      dockerfile: Dockerfile
+    image: emfrontend-image
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
 
