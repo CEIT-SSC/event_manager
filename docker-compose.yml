@@ -1,1 +1,56 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:     ${DB_NAME}
+      POSTGRES_USER:   ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks: [emnet]
+  
+  backend:
+    build:
+      context: ./em_backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./em_backend/.env            
+    depends_on: [db]
+    volumes:
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+    networks: [emnet]
+
+  frontend:
+    build:
+      context: ./em_frontend
+      dockerfile: Dockerfile
+    env_file:
+      - ./em_frontend/.env           
+    networks: [emnet]
+
+  nginx:
+    image: nginx:alpine
+    depends_on: [backend, frontend]
+    ports:
+      - "443:443"   
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - static_data:/assets/static
+      - media_data:/assets/media
+    networks: [emnet]
+
+volumes:
+  db_data:
+  static_data:
+  media_data:
+
+networks:
+  emnet:
+    driver: bridge
 
