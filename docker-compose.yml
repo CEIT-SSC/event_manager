@@ -24,7 +24,7 @@ services:
     networks: [emnet]
 
   backend:
-    image: event-manager-backend:latest
+    image: ghcr.io/ceit-ssc/event-manager-backend:${IMAGE_TAG:-latest}
     build:
       context: ./em_backend
       dockerfile: Dockerfile
@@ -41,7 +41,7 @@ services:
 
   frontend:
     <<: *frontend-common
-    image: event-manager-frontend-ssc:latest
+    image: ghcr.io/ceit-ssc/event-manager-frontend-ssc:${IMAGE_TAG:-latest}
     build:
       <<: *frontend-build
       args:
@@ -54,7 +54,7 @@ services:
 
   levelup:
     <<: *frontend-common
-    image: event-manager-frontend-levelup:latest
+    image: ghcr.io/ceit-ssc/event-manager-frontend-levelup:${IMAGE_TAG:-latest}
     build:
       <<: *frontend-build
       args:
@@ -67,7 +67,7 @@ services:
 
   gamecraft:
     <<: *frontend-common
-    image: event-manager-frontend-gamecraft:latest
+    image: ghcr.io/ceit-ssc/event-manager-frontend-gamecraft:${IMAGE_TAG:-latest}
     build:
       <<: *frontend-build
       args:
