@@ -1,49 +1,82 @@
-version: "3.9"
+x-frontend-build: &frontend-build
+  context: ./em_frontend
+  dockerfile: Dockerfile
+
+x-frontend-common: &frontend-common
+  networks: [emnet]
+  restart: unless-stopped
+  extra_hosts:
+    - "api.ceit-ssc.ir:host-gateway"
+    - "ceit-ssc.ir:host-gateway"
+  environment:
+    NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB:     ${DB_NAME}
-      POSTGRES_USER:   ${DB_USER}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql/data
     networks: [emnet]
-  
+
   backend:
+    image: event-manager-backend:latest
     build:
       context: ./em_backend
       dockerfile: Dockerfile
     env_file:
-      - ./em_backend/.env            
+      - ./em_backend/.env
     depends_on: [db]
+    ports:
+      - "8000:8000"
     volumes:
       - static_data:/app/staticfiles
       - media_data:/app/media
     networks: [emnet]
+    restart: unless-stopped
 
   frontend:
+    <<: *frontend-common
+    image: event-manager-frontend-ssc:latest
     build:
-      context: ./em_frontend
-      dockerfile: Dockerfile
+      <<: *frontend-build
+      args:
+        APP_PATH: apps/ssc
+        APP_FILTER: "@ssc/web"
     env_file:
-      - ./em_frontend/.env           
-    networks: [emnet]
-
-  nginx:
-    image: nginx:alpine
-    depends_on: [backend, frontend]
+      - ./em_frontend/apps/ssc/.env
     ports:
-      - "443:443"   
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
-      - static_data:/assets/static
-      - media_data:/assets/media
-    networks: [emnet]
+      - "3000:3000"
+
+  levelup:
+    <<: *frontend-common
+    image: event-manager-frontend-levelup:latest
+    build:
+      <<: *frontend-build
+      args:
+        APP_PATH: apps/level_up
+        APP_FILTER: "@ssc/level_up"
+    env_file:
+      - ./em_frontend/apps/level_up/.env
+    ports:
+      - "3001:3000"
+
+  gamecraft:
+    <<: *frontend-common
+    image: event-manager-frontend-gamecraft:latest
+    build:
+      <<: *frontend-build
+      args:
+        APP_PATH: apps/game_craft
+        APP_FILTER: "@ssc/game_craft"
+    env_file:
+      - ./em_frontend/apps/game_craft/.env
+    ports:
+      - "3002:3000"
 
 volumes:
   db_data:
@@ -53,4 +86,3 @@ volumes:
 networks:
   emnet:
     driver: bridge
-
