@@ -102,6 +102,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve public event ID
+        id: frontend-config
+        shell: bash
+        env:
+          LEVELUP_EVENT_ID: ${{ vars.LEVELUP_EVENT_ID }}
+          GAMECRAFT_EVENT_ID: ${{ vars.GAMECRAFT_EVENT_ID }}
+        run: |
+          case "${{ matrix.app }}" in
+            levelup) event_id="$LEVELUP_EVENT_ID" ;;
+            gamecraft) event_id="$GAMECRAFT_EVENT_ID" ;;
+            *) event_id="not-required" ;;
+          esac
+
+          if [[ "${{ matrix.app }}" != "ssc" && ! "$event_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Configure the repository variable for the ${{ matrix.app }} event ID." >&2
+            exit 1
+          fi
+
+          echo "event_id=$event_id" >> "$GITHUB_OUTPUT"
+
       - name: Build and push ${{ matrix.app }}
         uses: docker/build-push-action@v7
         with:
@@ -111,6 +131,7 @@ jobs:
           build-args: |
             APP_PATH=${{ matrix.app_path }}
             APP_FILTER=${{ matrix.app_filter }}
+            GAME_CRAFT_SSC_EVENT_ID=${{ steps.frontend-config.outputs.event_id }}
           tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/${{ matrix.image }}:${{ steps.image.outputs.sha_short }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
