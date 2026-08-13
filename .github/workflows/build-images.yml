@@ -1,0 +1,140 @@
+name: Build and publish Docker images
+
+on:
+  push:
+    branches:
+      - main
+      - build/ghcr-images
+  workflow_dispatch:
+
+concurrency:
+  group: docker-images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  backend:
+    name: Backend image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Prepare image metadata
+        id: image
+        shell: bash
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v7
+        with:
+          context: ./em_backend
+          file: ./em_backend/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/event-manager-backend:${{ steps.image.outputs.sha_short }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  frontends:
+    name: Frontend image (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: ssc
+            image: event-manager-frontend-ssc
+            app_path: apps/ssc
+            app_filter: "@ssc/web"
+          - app: levelup
+            image: event-manager-frontend-levelup
+            app_path: apps/level_up
+            app_filter: "@ssc/level_up"
+          - app: gamecraft
+            image: event-manager-frontend-gamecraft
+            app_path: apps/game_craft
+            app_filter: "@ssc/game_craft"
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Prepare image metadata
+        id: image
+        shell: bash
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve public event ID
+        id: frontend-config
+        shell: bash
+        env:
+          LEVELUP_EVENT_ID: ${{ vars.LEVELUP_EVENT_ID }}
+          GAMECRAFT_EVENT_ID: ${{ vars.GAMECRAFT_EVENT_ID }}
+        run: |
+          case "${{ matrix.app }}" in
+            levelup) event_id="$LEVELUP_EVENT_ID" ;;
+            gamecraft) event_id="$GAMECRAFT_EVENT_ID" ;;
+            *) event_id="not-required" ;;
+          esac
+
+          if [[ "${{ matrix.app }}" != "ssc" && ! "$event_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Configure the repository variable for the ${{ matrix.app }} event ID." >&2
+            exit 1
+          fi
+
+          echo "event_id=$event_id" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.app }}
+        uses: docker/build-push-action@v7
+        with:
+          context: ./em_frontend
+          file: ./em_frontend/Dockerfile
+          push: true
+          build-args: |
+            APP_PATH=${{ matrix.app_path }}
+            APP_FILTER=${{ matrix.app_filter }}
+            GAME_CRAFT_SSC_EVENT_ID=${{ steps.frontend-config.outputs.event_id }}
+          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/${{ matrix.image }}:${{ steps.image.outputs.sha_short }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=frontend-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=frontend-${{ matrix.app }}
