@@ -19,8 +19,71 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  resolve-sources:
+    name: Resolve application sources
+    runs-on: ubuntu-latest
+    outputs:
+      backend_branch: ${{ steps.sources.outputs.backend_branch }}
+      backend_sha: ${{ steps.sources.outputs.backend_sha }}
+      frontend_branch: ${{ steps.sources.outputs.frontend_branch }}
+      frontend_sha: ${{ steps.sources.outputs.frontend_sha }}
+      source_tag: ${{ steps.sources.outputs.source_tag }}
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Resolve matching branches or main
+        id: sources
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ github.ref_type == 'branch' && github.ref_name || 'main' }}
+        run: |
+          set -euo pipefail
+
+          resolve_source() {
+            local path="$1"
+            local branch
+
+            if git -C "$path" ls-remote --exit-code --heads origin \
+              "refs/heads/$TARGET_BRANCH" >/dev/null; then
+              branch="$TARGET_BRANCH"
+            else
+              branch="main"
+            fi
+
+            git -C "$path" fetch --quiet --depth=1 origin \
+              "refs/heads/$branch"
+            printf '%s %s\n' "$branch" "$(git -C "$path" rev-parse FETCH_HEAD)"
+          }
+
+          read -r backend_branch backend_sha < <(resolve_source em_backend)
+          read -r frontend_branch frontend_sha < <(resolve_source em_frontend)
+          source_tag="${GITHUB_SHA:0:7}-b${backend_sha:0:7}-f${frontend_sha:0:7}"
+
+          {
+            echo "backend_branch=$backend_branch"
+            echo "backend_sha=$backend_sha"
+            echo "frontend_branch=$frontend_branch"
+            echo "frontend_sha=$frontend_sha"
+            echo "source_tag=$source_tag"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Resolved application sources"
+            echo
+            echo "- Event manager branch: \`$TARGET_BRANCH\`"
+            echo "- Backend: \`$backend_branch\` at \`${backend_sha:0:7}\`"
+            echo "- Frontend: \`$frontend_branch\` at \`${frontend_sha:0:7}\`"
+            echo "- Immutable image tag: \`$source_tag\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   backend:
     name: Backend image
+    needs: resolve-sources
     runs-on: ubuntu-latest
 
     steps:
@@ -28,6 +91,13 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Check out resolved backend source
+        env:
+          SOURCE_SHA: ${{ needs.resolve-sources.outputs.backend_sha }}
+        run: |
+          git -C em_backend fetch --quiet --depth=1 origin "$SOURCE_SHA"
+          git -C em_backend checkout --quiet --detach "$SOURCE_SHA"
 
       - name: Prepare image metadata
         id: image
@@ -52,15 +122,19 @@ jobs:
           context: ./em_backend
           file: ./em_backend/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/event-manager-backend:${{ steps.image.outputs.sha_short }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/event-manager-backend:${{ steps.image.outputs.sha_short }}
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/event-manager-backend:${{ needs.resolve-sources.outputs.source_tag }}
           labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/CEIT-SSC/em_backend
+            org.opencontainers.image.revision=${{ needs.resolve-sources.outputs.backend_sha }}
+            org.opencontainers.image.event-manager-revision=${{ github.sha }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
   frontends:
     name: Frontend image (${{ matrix.app }})
+    needs: resolve-sources
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -84,6 +158,13 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Check out resolved frontend source
+        env:
+          SOURCE_SHA: ${{ needs.resolve-sources.outputs.frontend_sha }}
+        run: |
+          git -C em_frontend fetch --quiet --depth=1 origin "$SOURCE_SHA"
+          git -C em_frontend checkout --quiet --detach "$SOURCE_SHA"
 
       - name: Prepare image metadata
         id: image
@@ -132,9 +213,12 @@ jobs:
             APP_PATH=${{ matrix.app_path }}
             APP_FILTER=${{ matrix.app_filter }}
             GAME_CRAFT_SSC_EVENT_ID=${{ steps.frontend-config.outputs.event_id }}
-          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/${{ matrix.image }}:${{ steps.image.outputs.sha_short }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/${{ matrix.image }}:${{ steps.image.outputs.sha_short }}
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.owner }}/${{ matrix.image }}:${{ needs.resolve-sources.outputs.source_tag }}
           labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/CEIT-SSC/em_frontend
+            org.opencontainers.image.revision=${{ needs.resolve-sources.outputs.frontend_sha }}
+            org.opencontainers.image.event-manager-revision=${{ github.sha }}
           cache-from: type=gha,scope=frontend-${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=frontend-${{ matrix.app }}
